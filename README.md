@@ -31,6 +31,9 @@ docker run -v my_volume:/uploads -p 80:80 -e URL_BASE_PATH=/my-base-path/ hallot
 | `LISTEN`        | `:80`      | Internal address and port to listen on          |
 | `LOG_FORMAT`    |            | Logging format: `json` `logfmt` else text mode  |
 | `ROOT_DIR`      | `/uploads` | Root directory for uploaded files               |
+| `TOKEN_DELETE`  |            | Token for DELETE method                         |
+| `TOKEN_GET`     |            | Token for GET method                            |
+| `TOKEN_PUT`     |            | Token for PUT method                            |
 | `URL_BASE_PATH` | `/`        | Base path for URL                               |
 
 ### Upload
@@ -63,6 +66,14 @@ curl -X DELETE example.com/test.txt
 
 ## Security
 
-The server **does not** implement **any** kind of security. \
-Everybody can upload, download and delete any file as they please. \
-CORS is always enabled: `Access-Control-Allow-Origin: *`
+CORS is always enabled: `Access-Control-Allow-Origin: *`.
+
+The server implements a very simple token auth per method.
+
+_Example:_ \
+To restrict access to PUT requests set the environment variable TOKEN_PUT to your desired token. \
+Now you have to specify this token with your request parameters.
+
+```shell
+curl -X PUT -F "file=@my/file.jpg" example.com/some/dir/my-picture.jpg?token={your-token}
+```

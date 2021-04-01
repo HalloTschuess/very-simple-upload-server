@@ -18,9 +18,20 @@ var (
 	logFormat   = os.Getenv("LOG_FORMAT")
 )
 
+var tokens = map[string]string{
+	http.MethodGet:    os.Getenv("TOKEN_GET"),
+	http.MethodPut:    os.Getenv("TOKEN_PUT"),
+	http.MethodDelete: os.Getenv("TOKEN_DELETE"),
+}
+
 func init() {
 	if rootDir == "" {
 		rootDir = "/uploads"
+	}
+
+	err := os.MkdirAll(rootDir, os.ModePerm)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	if urlBasePath == "" {
@@ -56,13 +67,27 @@ func main() {
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
+	if tokens[r.Method] != "" {
+		queryToken := r.URL.Query().Get("token")
+
+		if queryToken == "" {
+			log.Debugf("Missing token for %s: %s", r.Method, r.URL.Path)
+			http.Error(w, "Missing token", http.StatusUnauthorized)
+
+			return
+		}
+
+		if tokens[r.Method] != queryToken {
+			log.Debugf("Wrong token for %s: %s", r.Method, r.URL.Path)
+			http.Error(w, "Wrong token", http.StatusUnauthorized)
+
+			return
+		}
+	}
+
 	log.Debugf("%s: %s", r.Method, r.URL.Path)
 
-	if r.Method == http.MethodGet {
-		http.StripPrefix(urlBasePath, http.FileServer(http.Dir(rootDir))).ServeHTTP(w, r)
-
-		return
-	} else if r.URL.Path == urlBasePath {
+	if r.URL.Path == urlBasePath && r.Method != http.MethodGet {
 		log.Debugf("Unsupported method")
 		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "Method not allowed.", http.StatusMethodNotAllowed)
@@ -71,6 +96,8 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch r.Method {
+	case http.MethodGet:
+		http.StripPrefix(urlBasePath, http.FileServer(http.Dir(rootDir))).ServeHTTP(w, r)
 	case http.MethodPut:
 		handlePut(w, r)
 	case http.MethodDelete:
