@@ -11,11 +11,13 @@ import (
 )
 
 var (
-	rootDir     = os.Getenv("ROOT_DIR")
-	urlBasePath = os.Getenv("URL_BASE_PATH")
-	listen      = os.Getenv("LISTEN")
-	debug, _    = strconv.ParseBool(os.Getenv("DEBUG"))
-	logFormat   = os.Getenv("LOG_FORMAT")
+	rootDir          = os.Getenv("ROOT_DIR")
+	urlBasePath      = os.Getenv("URL_BASE_PATH")
+	listen           = os.Getenv("LISTEN")
+	debug, _         = strconv.ParseBool(os.Getenv("DEBUG"))
+	logFormat        = os.Getenv("LOG_FORMAT")
+	authHeader       = os.Getenv("AUTH_HEADER")
+	authHeaderPrefix = os.Getenv("AUTH_HEADER_PREFIX")
 )
 
 var tokens = map[string]string{
@@ -55,29 +57,54 @@ func init() {
 	} else {
 		log.SetLevel(log.InfoLevel)
 	}
+
+	if authHeader == "" {
+		authHeader = "Authorization"
+	}
+
+	if authHeaderPrefix == "" {
+		authHeaderPrefix = "Bearer "
+	}
 }
 
 func main() {
 	log.Info("Staring simple upload server.")
-
-	http.HandleFunc(urlBasePath, handleRoot)
-	log.Panic(http.ListenAndServe(listen, nil))
+	log.Panic(http.ListenAndServe(listen, http.HandlerFunc(handleRoot)))
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	if tokens[r.Method] != "" {
-		queryToken := r.URL.Query().Get("token")
+	if r.URL.Path == urlBasePath && r.Method != http.MethodGet {
+		log.Debugf("Unsupported method %s for /", r.Method)
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "Method not allowed.", http.StatusMethodNotAllowed)
 
-		if queryToken == "" {
+		return
+	}
+
+	if tokens[r.Method] != "" {
+		token := r.URL.Query().Get("token")
+
+		if _, ok := r.Header[authHeader]; ok && token == "" {
+			if !strings.HasPrefix(r.Header.Get(authHeader), authHeaderPrefix) {
+				log.Debugf("Wrong header prefix for %s: %s", r.Method, r.URL.Path)
+				http.Error(w, "Wrong header prefix", http.StatusUnauthorized)
+
+				return
+			}
+
+			token = strings.TrimPrefix(r.Header.Get(authHeader), authHeaderPrefix)
+		}
+
+		if token == "" {
 			log.Debugf("Missing token for %s: %s", r.Method, r.URL.Path)
 			http.Error(w, "Missing token", http.StatusUnauthorized)
 
 			return
 		}
 
-		if tokens[r.Method] != queryToken {
+		if tokens[r.Method] != token {
 			log.Debugf("Wrong token for %s: %s", r.Method, r.URL.Path)
 			http.Error(w, "Wrong token", http.StatusUnauthorized)
 
@@ -87,14 +114,6 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 
 	log.Debugf("%s: %s", r.Method, r.URL.Path)
 
-	if r.URL.Path == urlBasePath && r.Method != http.MethodGet {
-		log.Debugf("Unsupported method")
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "Method not allowed.", http.StatusMethodNotAllowed)
-
-		return
-	}
-
 	switch r.Method {
 	case http.MethodGet:
 		http.StripPrefix(urlBasePath, http.FileServer(http.Dir(rootDir))).ServeHTTP(w, r)
@@ -103,8 +122,8 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		handleDelete(w, r)
 	default:
-		log.Debug("Unsupported method")
-		w.Header().Set("Allow", http.MethodGet+", "+http.MethodPut+", "+http.MethodDelete)
+		log.Debug("Unsupported method %s for %s", r.Method, r.URL.Path)
+		w.Header().Set("Allow", strings.Join([]string{http.MethodGet, http.MethodPut, http.MethodDelete}, ", "))
 		http.Error(w, "Method not allowed.", http.StatusMethodNotAllowed)
 	}
 }
@@ -135,7 +154,6 @@ func handlePut(w http.ResponseWriter, r *http.Request) {
 
 	formFile, _, err := r.FormFile("file")
 	if err != nil {
-		defer r.Body.Close() // I don't know if this is needed
 		fileReader = r.Body
 	} else {
 		defer formFile.Close()
